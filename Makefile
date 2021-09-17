@@ -10,9 +10,11 @@ all:test lib
 test:$(patsubst %.c,%.o,$(TEST_SRC)) $(LIBXXH)
 	$(CC) $(LDFLAGS) -o $@ $^
 
-lib:$(patsubst %.c,%.o,$(LIB_SRC)) $(LIBXXH)
+lib:libmap.a
+
+libmap.a:$(patsubst %.c,%.o,$(LIB_SRC)) $(LIBXXH)
 	$(AR) -x $(LIBXXH)
-	$(AR) -rcs -o libmap.a *.o
+	$(AR) -rcs -o $@ *.o
 
 $(LIBXXH):xxHash
 	$(MAKE) -C $< libxxhash.a CFLAGS=-Os
