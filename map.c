@@ -6,13 +6,13 @@
 #include "xxHash/xxhash.h"
 
 
-#define MIN_HASH_TABLE_SIZE 1<<4
+#define MIN_HASH_TABLE_SIZE (1<<4)
 
 typedef struct hash_node_s
 {
     struct hash_node_s* next;
     struct hash_node_s* prev;
-    char* key;
+    void* key;
     size_t key_len;
     uint32_t full_hash;
     void* value;
@@ -51,8 +51,8 @@ map_handle_t map_create(void)
     memset(map,0,sizeof(map));
     map->item_len = 0;
     // decrase threshold = table_len/4
-    // decrase threshold is -1 if it < min_hash_table_size/2
-    map->decrease_th = -1;
+    // decrase threshold is 0 if it < min_hash_table_size/2
+    map->decrease_th = 0;
     map->table_len = MIN_HASH_TABLE_SIZE;
     map->hash_mask = (uint32_t)(map->table_len) - 1;
     map->hash_table = malloc(sizeof(hash_entry_t)*(map->table_len));
@@ -98,25 +98,44 @@ int map_delete(map_handle_t handle,void(*free_value)(void* value,void* ctx),void
     return 0;
 }
 
-int map_add(map_handle_t handle,void* key,size_t key_len,void* value)
+void* map_add(map_handle_t handle,void* key,size_t key_len,void* value)
 {
     if(__builtin_expect(!handle,0))
-        return -1;
+        return NULL;
     map_t* map = (map_t*)handle;
+
+    // check for repeat key
+    uint32_t full_hash = get_hash(key,key_len);
+    uint32_t hash = full_hash & map->hash_mask;
+    hash_entry_t* entry = &(map->hash_table[hash]);
+    hash_node_t* old_node = entry->head;
+    while(old_node)
+    {
+        if(old_node->key_len == key_len)
+        {
+            if(memcmp(old_node->key,key,key_len)==0)
+            {
+                void* old_value = old_node->value;
+                old_node->value = value;
+                return old_value;
+            }
+        }
+        old_node = old_node->next;
+    }
+
     // key & node use one block of memory
     hash_node_t* new_node = malloc(sizeof(hash_node_t)+key_len);
     if(__builtin_expect(!new_node,0))
-        return -1;
-    // remove redundant operation
+        return NULL;
+
+    // redundant operation
     // new_node->next = NULL;
     new_node->prev = NULL;
     new_node->key = (uint8_t*)(new_node + 1);
     new_node->key_len = key_len;
     memcpy(new_node->key,key,key_len);
     new_node->value = value;
-    new_node->full_hash = get_hash(key,key_len);
-    uint32_t hash = new_node->full_hash & map->hash_mask;
-    hash_entry_t* entry = &(map->hash_table[hash]);
+    new_node->full_hash = full_hash;
     new_node->next = entry->head;
     if(new_node->next != NULL)
         new_node->next->prev = new_node;
@@ -126,7 +145,7 @@ int map_add(map_handle_t handle,void* key,size_t key_len,void* value)
 
     try_increase_hash_table(map);
 
-    return 0;
+    return value;
 }
 
 
@@ -183,11 +202,100 @@ size_t map_get_length(map_handle_t handle)
     return map->item_len;
 }
 
-// Keys are only references. They will be invalid as soon as the map is deleted.
-map_key_t* map_keys(map_handle_t handle,size_t* len);
+
+map_key_t* map_keys(map_handle_t handle,size_t* len)
+{
+    if(__builtin_expect(!handle,0))
+    {
+        *len = 0;
+        return NULL;
+    }
+    map_t* map = (map_t*)handle;
+    map_key_t* keys = malloc(sizeof(map_key_t) * (map->item_len));
+    if(__builtin_expect(!keys,0))
+    {
+        *len = 0;
+        return NULL;
+    }
+    size_t i = 0;
+    for(size_t j=0;j<map->table_len;j++)
+    {
+        hash_entry_t* entry = &(map->hash_table[j]);
+        hash_node_t* node = entry->head;
+        while(node != NULL)
+        {
+            keys[i].key = node->key;
+            keys[i].len = node->key_len;
+            i++;
+            node = node->next;
+        }
+    }
+    *len = map->item_len;
+    return keys;
+}
+
 // Values are persist if they are not freed in map_delete.
-void** map_values(map_handle_t handle,size_t* len);
-map_entry_t* map_entries(map_handle_t handle,size_t* len);
+void** map_values(map_handle_t handle,size_t* len)
+{
+    if(__builtin_expect(!handle,0))
+    {
+        *len = 0;
+        return NULL;
+    }
+    map_t* map = (map_t*)handle;
+    void** values = malloc(sizeof(void*) * (map->item_len));
+    if(__builtin_expect(!values,0))
+    {
+        *len = 0;
+        return NULL;
+    }
+    size_t i = 0;
+    for(size_t j=0;j<map->table_len;j++)
+    {
+        hash_entry_t* entry = &(map->hash_table[j]);
+        hash_node_t* node = entry->head;
+        while(node != NULL)
+        {
+            values[i] = node->value;
+            i++;
+            node = node->next;
+        }
+    }
+    *len = map->item_len;
+    return values;
+}
+
+map_entry_t* map_entries(map_handle_t handle,size_t* len)
+{
+    if(__builtin_expect(!handle,0))
+    {
+        *len = 0;
+        return NULL;
+    }
+    map_t* map = (map_t*)handle;
+    map_entry_t* entries = malloc(sizeof(map_entry_t) * (map->item_len));
+    if(__builtin_expect(!entries,0))
+    {
+        *len = 0;
+        return NULL;
+    }
+    size_t i = 0;
+    for(size_t j=0;j<map->table_len;j++)
+    {
+        hash_entry_t* entry = &(map->hash_table[j]);
+        hash_node_t* node = entry->head;
+        while(node != NULL)
+        {
+            entries[i].key.key = node->key;
+            entries[i].key.len = node->key_len;
+            entries[i].value = node->value;
+            i++;
+            node = node->next;
+        }
+    }
+    *len = map->item_len;
+    return entries;
+}
 
 /* private methods */
 
@@ -226,7 +334,7 @@ static inline void try_increase_hash_table(map_t* map)
     map->decrease_th = map->table_len/4;
     // this is redundant
     // if(map->decrease_th < MIN_HASH_TABLE_SIZE/2)
-        // map->decrease_th = -1;
+        // map->decrease_th = 0;
     // adjust nodes
     uint32_t select_mask = (uint32_t)old_len;
     for(size_t i=0;i<old_len;i++)
@@ -288,7 +396,7 @@ static inline void try_decrease_hash_table(map_t* map)
     map->hash_mask = (uint32_t)(map->table_len)-1;
     map->decrease_th = map->table_len/4;
     if(map->decrease_th < MIN_HASH_TABLE_SIZE/2)
-        map->decrease_th = -1;
+        map->decrease_th = 0;
 }
 
 /* diagnostic */
