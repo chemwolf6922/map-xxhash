@@ -21,7 +21,6 @@ typedef struct hash_node_s
 typedef struct
 {
     hash_node_t* head;
-    size_t len;
 } hash_entry_t;
 
 typedef struct
@@ -140,7 +139,6 @@ void* map_add(map_handle_t handle,void* key,size_t key_len,void* value)
     if(new_node->next != NULL)
         new_node->next->prev = new_node;
     entry->head = new_node;
-    entry->len ++;
     map->item_len ++;
 
     try_increase_hash_table(map);
@@ -167,7 +165,6 @@ void* map_remove(map_handle_t handle,void* key,size_t key_len)
     else
         entry->head = node->next;
     free(node);
-    entry->len--;
     map->item_len--;
     
     try_decrease_hash_table(map);
@@ -407,8 +404,15 @@ float map_get_conflict_ratio(map_handle_t* handle)
     size_t conflict_cnt = 0;
     for(size_t i=0;i<map->table_len;i++)
     {
-        if(map->hash_table[i].len > 1)
-            conflict_cnt += map->hash_table[i].len;
+        hash_node_t* node = map->hash_table[i].head;
+        size_t entry_len = 0;
+        while(node != NULL)
+        {
+            entry_len ++;
+            node = node->next;
+        }
+        if(entry_len > 1)
+            conflict_cnt += entry_len;
     }
     return ((float)conflict_cnt)/((float)map->item_len);
 }
@@ -419,7 +423,7 @@ float map_get_average_ops(map_handle_t* handle)
     size_t working_entry_cnt = 0;
     for(size_t i=0;i<map->table_len;i++)
     {
-        if(map->hash_table[i].len > 0)
+        if(map->hash_table[i].head != NULL)
             working_entry_cnt++;
     }
     return ((float)map->item_len)/((float)working_entry_cnt);
@@ -431,8 +435,15 @@ size_t map_get_max_ops(map_handle_t* handle)
     size_t max_entry_len = 0;
     for(size_t i=0;i<map->table_len;i++)
     {
-        if(map->hash_table[i].len > max_entry_len)
-            max_entry_len = map->hash_table[i].len;
+        hash_node_t* node = map->hash_table[i].head;
+        size_t entry_len = 0;
+        while(node != NULL)
+        {
+            entry_len ++;
+            node = node->next;
+        }
+        if(entry_len > max_entry_len)
+            max_entry_len = entry_len;
     }
     return max_entry_len;
 }
