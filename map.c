@@ -33,6 +33,9 @@ typedef struct
     size_t table_len;
     size_t item_len;
     size_t decrease_th;
+    // for forEach
+    size_t iterator_cnt;
+    hash_node_t* iterator_node;
 } map_t;
 
 /* pre defines */
@@ -302,6 +305,38 @@ map_entry_t* map_entries(map_handle_t handle,size_t* len)
     }
     *len = map->item_len;
     return entries;
+}
+
+int map_forEach_start(map_handle_t handle,map_entry_t* entry)
+{
+    if(__builtin_expect(!handle,0))
+    {
+        return -1;
+    }
+    map_t* map = (map_t*)handle;
+    map->iterator_cnt = 0;
+    map->iterator_node = (map->hash_table[0]).head;
+    return map_forEach_next(handle,entry);
+}
+
+int map_forEach_next(map_handle_t handle,map_entry_t* entry)
+{
+    map_t* map = (map_t*)handle;
+    // get next valid node
+    while(map->iterator_node == NULL)
+    {
+        map->iterator_cnt++;
+        if(map->iterator_cnt >= map->table_len)
+            return -1;
+        map->iterator_node = (map->hash_table[map->iterator_cnt]).head;
+    }
+    // set entry
+    entry->key.key = map->iterator_node->key;
+    entry->key.len = map->iterator_node->key_len;
+    entry->value = map->iterator_node->value;
+    // progress to next
+    map->iterator_node = map->iterator_node->next;
+    return 0;
 }
 
 /* private methods */

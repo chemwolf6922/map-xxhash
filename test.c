@@ -48,6 +48,12 @@ int main(int argc, char const *argv[])
         printf("key: %d\n",*(int*)(keys[i].key));
     }
     free(keys);
+    // forEach iterator demo
+    map_entry_t entry;
+    map_forEach(map,entry)
+    {
+        printf("key: %d, value: %d\n",*(int*)(entry.key.key),*(int*)(entry.value));
+    }
     // delete map
     map_delete(map,NULL,NULL);
 
