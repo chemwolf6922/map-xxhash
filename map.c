@@ -1,10 +1,13 @@
 #include <stdlib.h>
+#include <stdint.h>
 #include <stddef.h>
 #include <stdbool.h>
 #include <string.h>
 #include "map.h"
-#include "xxHash/xxhash.h"
 
+#ifndef USE_SIMPLE_HASH
+#include "xxHash/xxhash.h"
+#endif
 
 #define MIN_HASH_TABLE_SIZE (1<<4)
 
@@ -35,7 +38,14 @@ typedef struct
 /* pre defines */
 static inline uint32_t get_hash(uint8_t* data,size_t len)
 {
+#ifndef USE_SIMPLE_HASH
     return (uint32_t)XXH3_64bits(data,len);
+#else
+    uint32_t h = 0;
+    for(size_t i = 0; i < len; i++)
+        h = h * 263 + data[i];
+    return h;
+#endif
 }
 static inline hash_node_t* map_locate(map_t* map,void* key,size_t key_len,hash_entry_t** p_entry);
 static inline void try_increase_hash_table(map_t* map);

@@ -5,15 +5,24 @@ LIBXXH=xxHash/libxxhash.a
 LIB_SRC=map.c
 TEST_SRC=test.c $(LIB_SRC)
 
+HASH_DEP=
+ifndef USE_SIMPLE_HASH
+HASH_DEP=$(LIBXXH)
+else
+CFLAGS+=-DUSE_SIMPLE_HASH
+endif
+
 all:test lib
 
-test:$(patsubst %.c,%.o,$(TEST_SRC)) $(LIBXXH)
+test:$(patsubst %.c,%.o,$(TEST_SRC)) $(HASH_DEP)
 	$(CC) $(LDFLAGS) -o $@ $^
 
 lib:libmap.a
 
-libmap.a:$(patsubst %.c,%.o,$(LIB_SRC)) $(LIBXXH)
-	$(AR) -x $(LIBXXH)
+libmap.a:$(patsubst %.c,%.o,$(LIB_SRC)) $(HASH_DEP)
+ifndef USE_SIMPLE_HASH
+	$(AR) -x $(HASH_DEP)
+endif
 	$(AR) -rcs -o $@ *.o
 
 $(LIBXXH):xxHash
