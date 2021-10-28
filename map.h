@@ -37,6 +37,12 @@ void* map_add(map_handle_t handle,void* key,size_t key_len,void* value);
     If there is no such entry, return NULL.
 */
 void* map_remove(map_handle_t handle,void* key,size_t key_len);
+/*
+    Clear the map.
+    Use free_value and ctx to free the values themselves.
+    Those two can be NULL if not used.
+*/
+int map_clear(map_handle_t handle,void(*free_value)(void* value,void* ctx),void* ctx);
 /* Return NULL if the entry does not exist */
 void* map_get(map_handle_t handle,void* key,size_t key_len);
 bool map_has(map_handle_t handle,void* key,size_t key_len);

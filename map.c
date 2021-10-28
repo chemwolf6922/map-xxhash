@@ -81,11 +81,12 @@ error:
     return NULL;
 }
 
-int map_delete(map_handle_t handle,void(*free_value)(void* value,void* ctx),void* ctx)
+int map_clear(map_handle_t handle,void(*free_value)(void* value,void* ctx),void* ctx)
 {
     if(__builtin_expect(!handle,0))
         return -1;
     map_t* map = (map_t*)handle;
+    /* free values */
     for(size_t i=0;i<map->table_len;i++)
     {
         hash_entry_t* entry = &(map->hash_table[i]);
@@ -105,6 +106,24 @@ int map_delete(map_handle_t handle,void(*free_value)(void* value,void* ctx),void
             } 
         }
     }
+    /* reset hash table */
+    map->item_len = 0;
+    map->decrease_th = 0;
+    map->table_len = MIN_HASH_TABLE_SIZE;
+    map->hash_mask = (uint32_t)(map->table_len) - 1;
+    map->hash_table = realloc(map->hash_table,sizeof(hash_entry_t)*(map->table_len));
+    if(!map->hash_table)
+        return -1;
+    memset(map->hash_table,0,sizeof(hash_entry_t)*(map->table_len));
+    return 0;
+}
+
+int map_delete(map_handle_t handle,void(*free_value)(void* value,void* ctx),void* ctx)
+{
+    int result = map_clear(handle,free_value,ctx);
+    if(result != 0)
+        return result;
+    map_t* map = (map_t*)handle;
     free(map->hash_table);
     free(map);
     return 0;

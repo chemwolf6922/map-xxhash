@@ -35,6 +35,17 @@ int main(int argc, char const *argv[])
     {
         map_remove(map,&(random_nums[i]),sizeof(int));
     }
+    // test clear
+    for(int i=0;i<1000000;i++)
+    {
+        map_add(map,&(random_nums[i]),sizeof(int),&value);
+    }
+    map_clear(map,NULL,NULL);
+    for(int i=0;i<1000000;i++)
+    {
+        map_add(map,&(random_nums[i]),sizeof(int),&value);
+    }
+    map_clear(map,NULL,NULL);
     // keys() iterator demo
     for(int i=0;i<10;i++)
     {
