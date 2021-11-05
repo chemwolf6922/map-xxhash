@@ -26,7 +26,7 @@ endif
 	$(AR) -rcs -o $@ *.o
 
 $(LIBXXH):xxHash
-	$(MAKE) -C $< libxxhash.a CFLAGS=-Os
+	$(MAKE) -C $< libxxhash.a CFLAGS=-O3
 
 %.o:%.c
 	$(CC) $(CFLAGS) -c $<
