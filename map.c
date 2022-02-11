@@ -60,7 +60,7 @@ map_handle_t map_create(void)
     map_t* map = malloc(sizeof(map_t));
     if(!map)
         goto error;
-    memset(map,0,sizeof(map));
+    memset(map,0,sizeof(map_t));
     map->item_len = 0;
     // decrase threshold = table_len/4
     // decrase threshold is 0 if it < min_hash_table_size/2
