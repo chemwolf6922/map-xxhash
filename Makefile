@@ -9,7 +9,7 @@ HASH_DEP=
 ifndef USE_SIMPLE_HASH
 HASH_DEP=$(LIBXXH)
 else
-CFLAGS+=-DUSE_SIMPLE_HASH
+override CFLAGS+=-DUSE_SIMPLE_HASH
 endif
 
 all:test lib
