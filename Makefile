@@ -1,5 +1,5 @@
 CFLAGS?=-O3
-CFLAGS+=-MMD -MP
+override CFLAGS+=-MMD -MP
 LDFLAGS?=
 LIBXXH=xxHash/libxxhash.a
 LIB_SRC=map.c
