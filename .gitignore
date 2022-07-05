@@ -1,6 +1,7 @@
 /.vscode
 /build
 /*.o
+/*.oo
 /*.d
 /test
 /libmap.a
