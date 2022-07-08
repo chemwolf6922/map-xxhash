@@ -74,10 +74,12 @@ map_handle_t map_create(void)
 
     return (map_handle_t)map;
 error:
-    if(map->hash_table != NULL)
-        free(map->hash_table);
-    if(map != NULL)
+    if(map)
+    {
+        if(map->hash_table != NULL)
+            free(map->hash_table);
         free(map);
+    }
     return NULL;
 }
 
