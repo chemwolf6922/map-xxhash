@@ -24,7 +24,7 @@ libmap.a:$(patsubst %.c,%.o,$(LIB_SRC)) $(HASH_DEP)
 ifndef USE_SIMPLE_HASH
 	$(AR) -x $(HASH_DEP)
 endif
-	$(AR) -rcs -o $@ *.o
+	$(AR) -rcs $@ *.o
 
 $(LIBXXH):xxHash
 	$(MAKE) -C $< libxxhash.a
