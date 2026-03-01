@@ -396,6 +396,11 @@ static inline void try_increase_hash_table(map_t* map)
     if(map->item_len <= map->table_len)
         return;
     size_t old_len = map->table_len;
+    if (old_len > UINT32_MAX)
+    {
+        /** The map won't be indexable by the 32bit hash after this. */
+        return;
+    }
     void* new_table = realloc(map->hash_table,sizeof(list_head_t) * old_len * 2);
     if(!new_table)
         return;
