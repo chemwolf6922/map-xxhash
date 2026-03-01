@@ -151,7 +151,7 @@ void* map_add(map_handle_t handle, const void* key, size_t key_len, void* value)
     hash_node_t* old_node = (hash_node_t*)(entry->next);
     while(old_node)
     {
-        if(old_node->key_len == key_len)
+        if(old_node->full_hash == full_hash && old_node->key_len == key_len)
         {
             if(memcmp(old_node->key,key,key_len)==0)
             {
@@ -237,6 +237,11 @@ map_key_t* map_keys(map_handle_t handle,size_t* len)
         return NULL;
     }
     map_t* map = (map_t*)handle;
+    if (map->item_len == 0)
+    {
+        *len = 0;
+        return NULL;
+    }
     map_key_t* keys = malloc(sizeof(map_key_t) * (map->item_len));
     if(!keys)
     {
@@ -267,6 +272,11 @@ void** map_values(map_handle_t handle,size_t* len)
         return NULL;
     }
     map_t* map = (map_t*)handle;
+    if (map->item_len == 0)
+    {
+        *len = 0;
+        return NULL;
+    }
     void** values = malloc(sizeof(void*) * (map->item_len));
     if(!values)
     {
@@ -296,6 +306,11 @@ map_entry_t* map_entries(map_handle_t handle,size_t* len)
         return NULL;
     }
     map_t* map = (map_t*)handle;
+    if (map->item_len == 0)
+    {
+        *len = 0;
+        return NULL;
+    }
     map_entry_t* entries = malloc(sizeof(map_entry_t) * (map->item_len));
     if(!entries)
     {
@@ -362,7 +377,7 @@ static inline hash_node_t* map_locate(
     hash_node_t* node = (hash_node_t*)(prev->next);
     while(node)
     {
-        if(key_len == node->key_len)
+        if(full_hash == node->full_hash && key_len == node->key_len)
         {
             if(memcmp(key,node->key,key_len)==0)
                 break;
