@@ -11,35 +11,36 @@
 
 #define MIN_HASH_TABLE_SIZE (1<<4)
 
+typedef struct list_head_s list_head_t;
+struct list_head_s
+{
+    list_head_t* next;
+};
+
 typedef struct hash_node_s
 {
-    struct hash_node_s* next;
-    struct hash_node_s* prev;
-    void* key;
-    size_t key_len;
-    uint32_t full_hash;
+    /** This MUST be at the begining. */
+    list_head_t list_head;
     void* value;
+    uint32_t full_hash;
+    size_t key_len;
+    uint8_t key[0];
 } hash_node_t;
 
 typedef struct
 {
-    hash_node_t* head;
-} hash_entry_t;
-
-typedef struct
-{
-    hash_entry_t* hash_table;
+    list_head_t* hash_table;
     uint32_t hash_mask;
     size_t table_len;
     size_t item_len;
     size_t decrease_th;
-    // for forEach
+    /** For iterator */
     size_t iterator_cnt;
     hash_node_t* iterator_node;
 } map_t;
 
 /* pre defines */
-static inline uint32_t get_hash(uint8_t* data,size_t len)
+static inline uint32_t get_hash(const uint8_t* data,size_t len)
 {
 #ifndef USE_SIMPLE_HASH
     return (uint32_t)XXH3_64bits(data,len);
@@ -50,9 +51,11 @@ static inline uint32_t get_hash(uint8_t* data,size_t len)
     return h;
 #endif
 }
-static inline hash_node_t* map_locate(map_t* map,void* key,size_t key_len,hash_entry_t** p_entry);
+static inline hash_node_t* map_locate(
+    map_t* map, const void* key, size_t key_len, list_head_t** p_prev);
 static inline void try_increase_hash_table(map_t* map);
 static inline void try_decrease_hash_table(map_t* map);
+
 /* public methods */
 
 map_handle_t map_create(void)
@@ -62,15 +65,17 @@ map_handle_t map_create(void)
         goto error;
     memset(map,0,sizeof(map_t));
     map->item_len = 0;
-    // decrase threshold = table_len/4
-    // decrase threshold is 0 if it < min_hash_table_size/2
+    /**
+     * decrase threshold = table_len/4
+     * decrase threshold is 0 if it < min_hash_table_size/2
+     */
     map->decrease_th = 0;
     map->table_len = MIN_HASH_TABLE_SIZE;
     map->hash_mask = (uint32_t)(map->table_len) - 1;
-    map->hash_table = malloc(sizeof(hash_entry_t)*(map->table_len));
+    map->hash_table = malloc(sizeof(list_head_t)*(map->table_len));
     if(!map->hash_table)
         goto error;
-    memset(map->hash_table,0,sizeof(hash_entry_t)*(map->table_len));
+    memset(map->hash_table,0,sizeof(list_head_t)*(map->table_len));
 
     return (map_handle_t)map;
 error:
@@ -85,38 +90,40 @@ error:
 
 int map_clear(map_handle_t handle,void(*free_value)(void* value,void* ctx),void* ctx)
 {
-    if(__builtin_expect(!handle,0))
+    if(!handle)
         return -1;
     map_t* map = (map_t*)handle;
     /* free values */
     for(size_t i=0;i<map->table_len;i++)
     {
-        hash_entry_t* entry = &(map->hash_table[i]);
-        if(entry->head != NULL)
-        {   
-            hash_node_t* node = entry->head;
-            while(node != NULL)
+        list_head_t* entry = &(map->hash_table[i]);
+        hash_node_t* node = (hash_node_t*)(entry->next);
+        while(node)
+        {
+            hash_node_t* next = (hash_node_t*)(node->list_head.next);
+            if(free_value)
             {
-                hash_node_t* next = node->next;
-                if(free_value != NULL)
-                {
-                    free_value(node->value,ctx);
-                }
-                // key & node use one block of memory
-                free(node);
-                node = next;
-            } 
+                free_value(node->value,ctx);
+            }
+            // key & node use one block of memory
+            free(node);
+            node = next;
         }
     }
-    /* reset hash table */
     map->item_len = 0;
+    /* Shrink hash table */
+    list_head_t* new_table = realloc(map->hash_table,sizeof(list_head_t)*MIN_HASH_TABLE_SIZE);
+    if (!new_table)
+    {
+        /** Shrink failed (How?). Wipe the old table */
+        memset(map->hash_table, 0, sizeof(list_head_t) * (map->table_len));
+        return 0;
+    }
+    memset(new_table,0,sizeof(list_head_t)*MIN_HASH_TABLE_SIZE);
+    map->hash_table = new_table;
     map->decrease_th = 0;
     map->table_len = MIN_HASH_TABLE_SIZE;
     map->hash_mask = (uint32_t)(map->table_len) - 1;
-    map->hash_table = realloc(map->hash_table,sizeof(hash_entry_t)*(map->table_len));
-    if(!map->hash_table)
-        return -1;
-    memset(map->hash_table,0,sizeof(hash_entry_t)*(map->table_len));
     return 0;
 }
 
@@ -131,17 +138,17 @@ int map_delete(map_handle_t handle,void(*free_value)(void* value,void* ctx),void
     return 0;
 }
 
-void* map_add(map_handle_t handle,void* key,size_t key_len,void* value)
+void* map_add(map_handle_t handle, const void* key, size_t key_len, void* value)
 {
-    if(__builtin_expect(!handle,0))
+    if(!handle || !key || key_len == 0 || !value)
         return NULL;
     map_t* map = (map_t*)handle;
 
-    // check for repeat key
+    /** check for repeat key */
     uint32_t full_hash = get_hash(key,key_len);
     uint32_t hash = full_hash & map->hash_mask;
-    hash_entry_t* entry = &(map->hash_table[hash]);
-    hash_node_t* old_node = entry->head;
+    list_head_t* entry = &(map->hash_table[hash]);
+    hash_node_t* old_node = (hash_node_t*)(entry->next);
     while(old_node)
     {
         if(old_node->key_len == key_len)
@@ -153,26 +160,22 @@ void* map_add(map_handle_t handle,void* key,size_t key_len,void* value)
                 return old_value;
             }
         }
-        old_node = old_node->next;
+        old_node = (hash_node_t*)old_node->list_head.next;
     }
 
-    // key & node use one block of memory
+    /** key & node use one block of memory */
     hash_node_t* new_node = malloc(sizeof(hash_node_t)+key_len);
-    if(__builtin_expect(!new_node,0))
+    if(!new_node)
         return NULL;
 
-    // redundant operation
+    /** redundant operation */
     // new_node->next = NULL;
-    new_node->prev = NULL;
-    new_node->key = (uint8_t*)(new_node + 1);
     new_node->key_len = key_len;
     memcpy(new_node->key,key,key_len);
     new_node->value = value;
     new_node->full_hash = full_hash;
-    new_node->next = entry->head;
-    if(new_node->next != NULL)
-        new_node->next->prev = new_node;
-    entry->head = new_node;
+    new_node->list_head.next = entry->next;
+    entry->next = (list_head_t*)new_node;
     map->item_len ++;
 
     try_increase_hash_table(map);
@@ -180,35 +183,29 @@ void* map_add(map_handle_t handle,void* key,size_t key_len,void* value)
     return value;
 }
 
-
-
-void* map_remove(map_handle_t handle,void* key,size_t key_len)
+void* map_remove(map_handle_t handle, const void* key, size_t key_len)
 {
-    if(__builtin_expect(!handle,0))
+    if(!handle || !key || key_len == 0)
         return NULL;
     map_t* map = (map_t*)handle;
-    hash_entry_t* entry = NULL;
-    hash_node_t* node = map_locate(map,key,key_len,&entry);
-    if(__builtin_expect(!node,0))
+    list_head_t* prev_head = NULL;
+    hash_node_t* node = map_locate(map,key,key_len,&prev_head);
+    if(!node)
         return NULL;
     void* value = node->value;
-    if(node->next)
-        node->next->prev = node->prev;
-    if(node->prev)
-        node->prev->next = node->next;
-    else
-        entry->head = node->next;
+    /** Checking of prev_head != NULL is redundant. */
+    prev_head->next = node->list_head.next;
     free(node);
     map->item_len--;
-    
+
     try_decrease_hash_table(map);
 
     return value;
 }
 
-void* map_get(map_handle_t handle,void* key,size_t key_len)
+void* map_get(map_handle_t handle, const void* key, size_t key_len)
 {
-    if(__builtin_expect(!handle,0))
+    if(!handle || !key || key_len == 0)
         return NULL;
     map_t* map = (map_t*)handle;
     hash_node_t* node = map_locate(map,key,key_len,NULL);
@@ -217,9 +214,9 @@ void* map_get(map_handle_t handle,void* key,size_t key_len)
     return NULL;
 }
 
-bool map_has(map_handle_t handle,void* key,size_t key_len)
+bool map_has(map_handle_t handle, const void* key, size_t key_len)
 {
-    if(__builtin_expect(!handle,0))
+    if(!handle || !key || key_len == 0)
         return false;
     map_t* map = (map_t*)handle;
     return map_locate(map,key,key_len,NULL) != NULL;
@@ -227,55 +224,51 @@ bool map_has(map_handle_t handle,void* key,size_t key_len)
 
 size_t map_get_length(map_handle_t handle)
 {
-    if(__builtin_expect(!handle,0))
-        return -1;
+    /** Trust handle != NULL to avoid return -1 (SIZE_MAX) */
     map_t* map = (map_t*)handle;
     return map->item_len;
 }
 
-
 map_key_t* map_keys(map_handle_t handle,size_t* len)
 {
-    if(__builtin_expect(!handle,0))
+    if(!handle)
     {
         *len = 0;
         return NULL;
     }
     map_t* map = (map_t*)handle;
     map_key_t* keys = malloc(sizeof(map_key_t) * (map->item_len));
-    if(__builtin_expect(!keys,0))
+    if(!keys)
     {
         *len = 0;
         return NULL;
     }
     size_t i = 0;
-    for(size_t j=0;j<map->table_len;j++)
+    for(size_t j=0; j<map->table_len; j++)
     {
-        hash_entry_t* entry = &(map->hash_table[j]);
-        hash_node_t* node = entry->head;
-        while(node != NULL)
+        hash_node_t* node = (hash_node_t*)(map->hash_table[j].next);
+        while(node)
         {
             keys[i].key = node->key;
             keys[i].len = node->key_len;
             i++;
-            node = node->next;
+            node = (hash_node_t*)(node->list_head.next);
         }
     }
     *len = map->item_len;
     return keys;
 }
 
-// Values are persist if they are not freed in map_delete.
 void** map_values(map_handle_t handle,size_t* len)
 {
-    if(__builtin_expect(!handle,0))
+    if(!handle)
     {
         *len = 0;
         return NULL;
     }
     map_t* map = (map_t*)handle;
     void** values = malloc(sizeof(void*) * (map->item_len));
-    if(__builtin_expect(!values,0))
+    if(!values)
     {
         *len = 0;
         return NULL;
@@ -283,13 +276,12 @@ void** map_values(map_handle_t handle,size_t* len)
     size_t i = 0;
     for(size_t j=0;j<map->table_len;j++)
     {
-        hash_entry_t* entry = &(map->hash_table[j]);
-        hash_node_t* node = entry->head;
+        hash_node_t* node = (hash_node_t*)(map->hash_table[j].next);
         while(node != NULL)
         {
             values[i] = node->value;
             i++;
-            node = node->next;
+            node = (hash_node_t*)(node->list_head.next);
         }
     }
     *len = map->item_len;
@@ -298,14 +290,14 @@ void** map_values(map_handle_t handle,size_t* len)
 
 map_entry_t* map_entries(map_handle_t handle,size_t* len)
 {
-    if(__builtin_expect(!handle,0))
+    if(!handle)
     {
         *len = 0;
         return NULL;
     }
     map_t* map = (map_t*)handle;
     map_entry_t* entries = malloc(sizeof(map_entry_t) * (map->item_len));
-    if(__builtin_expect(!entries,0))
+    if(!entries)
     {
         *len = 0;
         return NULL;
@@ -313,15 +305,14 @@ map_entry_t* map_entries(map_handle_t handle,size_t* len)
     size_t i = 0;
     for(size_t j=0;j<map->table_len;j++)
     {
-        hash_entry_t* entry = &(map->hash_table[j]);
-        hash_node_t* node = entry->head;
+        hash_node_t* node = (hash_node_t*)(map->hash_table[j].next);
         while(node != NULL)
         {
             entries[i].key.key = node->key;
             entries[i].key.len = node->key_len;
             entries[i].value = node->value;
             i++;
-            node = node->next;
+            node = (hash_node_t*)(node->list_head.next);
         }
     }
     *len = map->item_len;
@@ -330,131 +321,133 @@ map_entry_t* map_entries(map_handle_t handle,size_t* len)
 
 int map_forEach_start(map_handle_t handle,map_entry_t* entry)
 {
-    if(__builtin_expect(!handle,0))
+    if(!handle)
     {
         return -1;
     }
     map_t* map = (map_t*)handle;
     map->iterator_cnt = 0;
-    map->iterator_node = (map->hash_table[0]).head;
+    map->iterator_node = (hash_node_t*)((map->hash_table[0]).next);
     return map_forEach_next(handle,entry);
 }
 
 int map_forEach_next(map_handle_t handle,map_entry_t* entry)
 {
     map_t* map = (map_t*)handle;
-    // get next valid node
+    /** get next valid node */
     while(map->iterator_node == NULL)
     {
         map->iterator_cnt++;
         if(map->iterator_cnt >= map->table_len)
             return -1;
-        map->iterator_node = (map->hash_table[map->iterator_cnt]).head;
+        map->iterator_node = (hash_node_t*)(map->hash_table[map->iterator_cnt].next);
     }
-    // set entry
+    /** set entry */
     entry->key.key = map->iterator_node->key;
     entry->key.len = map->iterator_node->key_len;
     entry->value = map->iterator_node->value;
-    // progress to next
-    map->iterator_node = map->iterator_node->next;
+    /** progress to next */
+    map->iterator_node = (hash_node_t*)(map->iterator_node->list_head.next);
     return 0;
 }
 
 /* private methods */
 
-static inline hash_node_t* map_locate(map_t* map,void* key,size_t key_len,hash_entry_t** p_entry)
+static inline hash_node_t* map_locate(
+    map_t* map, const void* key, size_t key_len, list_head_t** p_prev)
 {
     uint32_t full_hash = get_hash(key,key_len);
     uint32_t hash = full_hash & map->hash_mask;
-    hash_entry_t* entry = &(map->hash_table[hash]);
-    hash_node_t* node = entry->head;
-    while(node != NULL)
+    list_head_t* prev = &(map->hash_table[hash]);
+    hash_node_t* node = (hash_node_t*)(prev->next);
+    while(node)
     {
         if(key_len == node->key_len)
         {
             if(memcmp(key,node->key,key_len)==0)
                 break;
         }
-        node = node->next;
+        prev = (list_head_t*)node;
+        node = (hash_node_t*)(prev->next);
     }
-    if(p_entry)
-        *p_entry = entry;
+    /** This does not harm if node is NULL. */
+    if (p_prev)
+        *p_prev = prev;
     return node;
 }
 
 static inline void try_increase_hash_table(map_t* map)
 {
-    if(__builtin_expect(map->item_len <= map->table_len,1))
+    if(map->item_len <= map->table_len)
         return;
     size_t old_len = map->table_len;
-    void* new_table = realloc(map->hash_table,sizeof(hash_entry_t) * old_len * 2);
+    void* new_table = realloc(map->hash_table,sizeof(list_head_t) * old_len * 2);
     if(!new_table)
         return;
     map->hash_table = new_table;
-    memset((map->hash_table)+old_len,0,sizeof(hash_entry_t)*old_len);
+    memset((map->hash_table)+old_len, 0, sizeof(list_head_t)*old_len);
     map->table_len = old_len * 2;
     map->hash_mask = (uint32_t)(map->table_len)-1;
     map->decrease_th = map->table_len/4;
-    // this is redundant
+    /** this is redundant */
     // if(map->decrease_th < MIN_HASH_TABLE_SIZE/2)
-        // map->decrease_th = 0;
-    // adjust nodes
+    //     map->decrease_th = 0;
+    /** adjust nodes */
     uint32_t select_mask = (uint32_t)old_len;
     for(size_t i=0;i<old_len;i++)
     {
-        hash_entry_t* entry = &(map->hash_table[i]);
-        hash_entry_t* new_entry = entry + old_len;
-        hash_node_t* node = entry->head;
-        while(node != NULL)
+        list_head_t* prev = &(map->hash_table[i]);
+        list_head_t* new_prev = prev + old_len;
+        hash_node_t* node = (hash_node_t*)prev->next;
+        while(node)
         {
-            hash_node_t* next = node->next;
             if(node->full_hash & select_mask)
             {
-                // move node
-                if(node->next)
-                    node->next->prev = node->prev;
-                if(node->prev)
-                    node->prev->next = node->next;
-                else
-                    entry->head = node->next;
-                node->prev = NULL;
-                node->next = new_entry->head;
-                if(new_entry->head)
-                    new_entry->head->prev = node;
-                new_entry->head = node;
+                /** move node. prev stays the same */
+                prev->next = node->list_head.next;
+                node->list_head.next = new_prev->next;
+                new_prev->next = (list_head_t*)node;
             }
-            node = next;
+            else
+            {
+                /** advance prev */
+                prev = (list_head_t*)node;
+            }
+            node = (hash_node_t*)prev->next;
         }
     }
 }
 
 static inline void try_decrease_hash_table(map_t* map)
 {
-    if(__builtin_expect(map->item_len >= map->decrease_th,1))
+    if(map->item_len >= map->decrease_th)
         return;
     size_t old_len = map->table_len;
     size_t new_len = old_len/2;
 
     for(size_t i=new_len;i<old_len;i++)
     {
-        hash_entry_t* entry = &(map->hash_table[i]);
-        if(entry->head)
+        list_head_t* entry = &(map->hash_table[i]);
+        if(entry->next)
         {
-            hash_entry_t* new_entry = &(map->hash_table[i-new_len]);
-            hash_node_t* old_head = entry->head;
-            hash_node_t* old_tail = entry->head;
-            while(old_tail->next)
-                old_tail = old_tail->next;
-            if(new_entry->head)
-                new_entry->head->prev = old_tail;
-            old_tail->next = new_entry->head;
-            new_entry->head = old_head;
-            // this is redundant
-            // old_head->head = NULL;
+            hash_node_t* old_head = (hash_node_t*)(entry->next);
+            /** find the old tail */
+            hash_node_t* old_tail = old_head;
+            while(old_tail->list_head.next)
+                old_tail = (hash_node_t*)(old_tail->list_head.next);
+            /** connect old chain to the head of the new chain. */
+            list_head_t* new_entry = &(map->hash_table[i-new_len]);
+            old_tail->list_head.next = new_entry->next;
+            new_entry->next = (list_head_t*)old_head;
         }
     }
 
-    map->hash_table = realloc(map->hash_table,sizeof(hash_entry_t) * new_len);
+    list_head_t* new_table = realloc(map->hash_table,sizeof(list_head_t) * new_len);
+    if (new_table)
+    {
+        /** If the shrink failed. The hash_table just takes a larger size than it appears. */
+        map->hash_table = new_table;
+    }
     map->table_len = new_len;
     map->hash_mask = (uint32_t)(map->table_len)-1;
     map->decrease_th = map->table_len/4;
@@ -462,20 +455,22 @@ static inline void try_decrease_hash_table(map_t* map)
         map->decrease_th = 0;
 }
 
+#ifdef MAP_ENABLE_DIAGNOSTIC
+
 /* diagnostic */
 
-float map_get_conflict_ratio(map_handle_t* handle)
+float map_get_conflict_ratio(map_handle_t handle)
 {
     map_t* map = (map_t*)handle;
     size_t conflict_cnt = 0;
     for(size_t i=0;i<map->table_len;i++)
     {
-        hash_node_t* node = map->hash_table[i].head;
+        hash_node_t* node = (hash_node_t*)(map->hash_table[i].next);
         size_t entry_len = 0;
         while(node != NULL)
         {
             entry_len ++;
-            node = node->next;
+            node = (hash_node_t*)(node->list_head.next);
         }
         if(entry_len > 1)
             conflict_cnt += entry_len;
@@ -483,33 +478,35 @@ float map_get_conflict_ratio(map_handle_t* handle)
     return ((float)conflict_cnt)/((float)map->item_len);
 }
 
-float map_get_average_ops(map_handle_t* handle)
+float map_get_average_ops(map_handle_t handle)
 {
     map_t* map = (map_t*)handle;
     size_t working_entry_cnt = 0;
     for(size_t i=0;i<map->table_len;i++)
     {
-        if(map->hash_table[i].head != NULL)
+        if(map->hash_table[i].next != NULL)
             working_entry_cnt++;
     }
     return ((float)map->item_len)/((float)working_entry_cnt);
 }
 
-size_t map_get_max_ops(map_handle_t* handle)
+size_t map_get_max_ops(map_handle_t handle)
 {
     map_t* map = (map_t*)handle;
     size_t max_entry_len = 0;
     for(size_t i=0;i<map->table_len;i++)
     {
-        hash_node_t* node = map->hash_table[i].head;
+        hash_node_t* node = (hash_node_t*)(map->hash_table[i].next);
         size_t entry_len = 0;
         while(node != NULL)
         {
             entry_len ++;
-            node = node->next;
+            node = (hash_node_t*)(node->list_head.next);
         }
         if(entry_len > max_entry_len)
             max_entry_len = entry_len;
     }
     return max_entry_len;
 }
+
+#endif

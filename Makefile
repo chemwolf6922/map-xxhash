@@ -15,7 +15,7 @@ endif
 
 all:test lib
 
-test:$(patsubst %.c,%.oo,$(TEST_SRC)) $(patsubst %.c,%.o,$(LIB_SRC)) $(HASH_DEP)
+test:$(patsubst %.c,%.oo,$(ALL_SRC)) $(HASH_DEP)
 	$(CC) $(LDFLAGS) -o $@ $^
 
 lib:libmap.a
@@ -30,7 +30,7 @@ $(LIBXXH):xxHash
 	$(MAKE) -C $< libxxhash.a
 
 %.oo:%.c
-	$(CC) $(CFLAGS) -o $@ -c $<
+	$(CC) $(CFLAGS) -DMAP_ENABLE_DIAGNOSTIC -o $@ -c $<
 
 %.o:%.c
 	$(CC) $(CFLAGS) -c $<

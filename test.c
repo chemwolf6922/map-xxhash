@@ -3,11 +3,11 @@
 #include <string.h>
 #include "map.h"
 
+static int random_nums[1000000] = {0};
 
 int main(int argc, char const *argv[])
 {
     // init random keys
-    int random_nums[1000000] = {0};
     for(int i=0;i<1000000;i++)
     {
         random_nums[i] = random();
