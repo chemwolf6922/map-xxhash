@@ -6,7 +6,7 @@
 #include "map.h"
 
 #ifndef USE_SIMPLE_HASH
-#include "xxHash/xxhash.h"
+#include <xxhash.h>
 #endif
 
 #define MIN_HASH_TABLE_SIZE (1<<4)
